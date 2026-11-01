@@ -16,7 +16,7 @@ Apercu du clone de RESSIM :
 
 <h2>Liste des fichiers</h2>
 
-Voici la liste des différents fichiers proposés dans CloneDRAW :
+Voici la liste des différents fichiers proposés dans ELECTRC :
 
 <table>
 	<tr>
