@@ -2960,8 +2960,8 @@ Procedure DrawTitle;Begin
  FillR(0,0,SW-1,TitleH-1,DarkGray);
  FillR(4,3,10,9,LightBlue);
  SetColor(White);Rectangle(4,3,10,9);
- If CurName<>'' Then TxtAt(18,3,'RESSIM '+AppVer+' - BaldEagle_V3.5  ['+CurName+']',White)
-  Else TxtAt(18,3,'RESSIM '+AppVer+' - BaldEagle_V3.5',White);
+ If CurName<>'' Then TxtAt(18,3,'RESSIM '+AppVer+'  ['+CurName+']',White)
+  Else TxtAt(18,3,'RESSIM '+AppVer,White);
 End;
 
 Procedure DrawModuleRow;
