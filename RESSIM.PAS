@@ -64,11 +64,7 @@ Const
  ISMax=12;          { points de la courbe de surcharge induite }
  NOps=2;            { jeux d'operations }
  NAlts=2;           { alternatives }
- LagSM=2;           { delai Sayers -> Marsh Ck Jct (heures) }
- LagMB=2;           { delai Marsh Ck Jct -> Beech Ck Station }
- LagBM=5;           { delai Beech Ck Station -> Mill Hall }
- SmoothBM=2;        { attenuation (demi-fenetre) du troncon precedent }
- LagMT=3;           { delai Mill Hall -> Bald Eagle Total }
+ {$IFDEF UNIX}DirSep='/';{$ELSE}DirSep='\';{$ENDIF}   { separateur de repertoire }
  Hr2Ac=0.0826446;   { 1 cfs pendant 1 heure en acres-pieds }
 
  { Modules }
@@ -110,6 +106,8 @@ Type
   OpSet:Byte;
   Incl,Valid:Boolean;
  End;
+ TAltArr=Array[0..NAlts-1] of TAlt;
+ TH4=Array[0..3] of Double;
  TResult=Record
   Elev,Stor,Rel:TSeries;
   Flow:Array[0..NNodes-1] of TSeries;
@@ -145,7 +143,7 @@ Var
  Running,Dirty:Boolean;
  { Modele }
  M,WM:TModel;
- Alts:Array[0..NAlts-1] of TAlt;
+ Alts:TAltArr;
  ActAlt:Integer;
  Res:Array[0..NAlts-1] of TResult;
  InfS,MarsS,BeecS,FishS:TSeries;
@@ -155,7 +153,11 @@ Var
  Playing:Boolean;
  LogL:Array[0..47] of String[64];
  LogN:Integer;
- FileName:String;
+ FileName,CurName:String;
+ PrjFr,PrjEn:String[60];
+ { Parametres charges depuis le fichier projet }
+ LagSM,LagMB,LagBM,LagMT,SmoothBM:Integer;  { delais de propagation (heures) }
+ HBase,HPeak,HT0,HTp:TH4; { hydrogrammes : Sayers, Marsh, Beech, Fishing }
  { Interface }
  Module:Integer;
  ModDrop:Boolean;
@@ -463,6 +465,12 @@ Procedure InitDefaults;Begin
  SimEnd:=NT-1;       { 5 dec 1993, 12:00 }
  DispT:=SimStart;
  LogN:=0;
+ LagSM:=2;LagMB:=2;LagBM:=5;SmoothBM:=2;LagMT:=3;
+ HBase[0]:=360;HPeak[0]:=9500;HT0[0]:=64;HTp[0]:=16;
+ HBase[1]:=60;HPeak[1]:=2400;HT0[1]:=62;HTp[1]:=9;
+ HBase[2]:=90;HPeak[2]:=3600;HT0[2]:=62;HTp[2]:=11;
+ HBase[3]:=70;HPeak[3]:=2000;HT0[3]:=64;HTp[3]:=13;
+ PrjFr:='';PrjEn:='';CurName:='';
 End;
 
 Function Hyd(T,T0,Tp,Base,Peak:Double):Double;
@@ -477,10 +485,10 @@ Procedure BuildInputs;
 Var T:Integer;
 Begin
  For T:=0 to MaxT-1 do Begin
-  InfS[T]:=Hyd(T,64,16,360,9500)*InflowFactor+360*(1-InflowFactor);
-  MarsS[T]:=Hyd(T,62,9,60,2400)*InflowFactor+60*(1-InflowFactor);
-  BeecS[T]:=Hyd(T,62,11,90,3600)*InflowFactor+90*(1-InflowFactor);
-  FishS[T]:=Hyd(T,64,13,70,2000)*InflowFactor+70*(1-InflowFactor);
+  InfS[T]:=Hyd(T,HT0[0],HTp[0],HBase[0],HPeak[0])*InflowFactor+HBase[0]*(1-InflowFactor);
+  MarsS[T]:=Hyd(T,HT0[1],HTp[1],HBase[1],HPeak[1])*InflowFactor+HBase[1]*(1-InflowFactor);
+  BeecS[T]:=Hyd(T,HT0[2],HTp[2],HBase[2],HPeak[2])*InflowFactor+HBase[2]*(1-InflowFactor);
+  FishS[T]:=Hyd(T,HT0[3],HTp[3],HBase[3],HPeak[3])*InflowFactor+HBase[3]*(1-InflowFactor);
  End;
 End;
 
@@ -1125,16 +1133,21 @@ Begin
 End;
 
 Var
- ChItems:Array[0..11] of String[44];
+ ChItems:Array[0..11] of String[70];
  ChN:Integer;
 
 Function ChoiceBox(Title:String;Sel:Integer):Integer;
 Var
- X,Y,W,H,I,Hov:Integer;
+ X,Y,W,H,I,Hov,MW:Integer;
  Done,Redraw:Boolean;
  R:Integer;
 Begin
- W:=300;H:=44+ChN*14;
+ MW:=0;
+ For I:=0 to ChN-1 do If Length(ChItems[I])>MW Then MW:=Length(ChItems[I]);
+ W:=MW*8+40;
+ If W<300 Then W:=300;
+ If W>SW-20 Then W:=SW-20;
+ H:=44+ChN*14;
  X:=(SW-W)div 2;Y:=(SH-H)div 3;
  Redraw:=True;Done:=False;R:=-1;
  If Sel<0 Then Sel:=0;
@@ -1297,9 +1310,15 @@ Begin
  {$I+}
  If IOResult<>0 Then Exit;
  WriteLn(F,'RESSIM 1');
+ WriteLn(F,'; Projet RESSIM : hydrogrammes, reseau, reservoir et operations');
+ WriteLn(F,'TITLE ',PrjFr);
+ WriteLn(F,'TITLE_EN ',PrjEn);
  WriteLn(F,'FACTOR ',InflowFactor:0:3);
  WriteLn(F,'INITELEV ',InitElev:0:2);
  WriteLn(F,'SIM ',SimStart,' ',SimEnd);
+ WriteLn(F,'LAG ',LagSM,' ',LagMB,' ',LagBM,' ',LagMT,' ',SmoothBM);
+ For I:=0 to 3 do
+  WriteLn(F,'HYD ',I,' ',HBase[I]:0:1,' ',HPeak[I]:0:1,' ',HT0[I]:0:1,' ',HTp[I]:0:1);
  For I:=0 to NAlts-1 do
   WriteLn(F,'ALT ',I,' ',Alts[I].OpSet,' ',Ord(Alts[I].Incl));
  WriteLn(F,'TOPDAM ',M.TopDam:0:2);
@@ -1329,13 +1348,46 @@ Procedure SetDescr;Begin
                     'Representation of the downstream regulation plan');
 End;
 
+Type
+ TState=Record
+  Mdl:TModel;
+  Al:TAltArr;
+  AA,SS,SE,L1,L2,L3,L4,L5:Integer;
+  Fct,IEl:Double;
+  HB,HP,H0,HT:TH4;
+  T1,T2:String[60];
+ End;
+
+Procedure GetState(Var S:TState);Begin
+ S.Mdl:=M;S.Al:=Alts;S.AA:=ActAlt;S.SS:=SimStart;S.SE:=SimEnd;
+ S.L1:=LagSM;S.L2:=LagMB;S.L3:=LagBM;S.L4:=LagMT;S.L5:=SmoothBM;
+ S.Fct:=InflowFactor;S.IEl:=InitElev;
+ S.HB:=HBase;S.HP:=HPeak;S.H0:=HT0;S.HT:=HTp;S.T1:=PrjFr;S.T2:=PrjEn;
+End;
+
+Procedure SetState(Var S:TState);Begin
+ M:=S.Mdl;Alts:=S.Al;ActAlt:=S.AA;SimStart:=S.SS;SimEnd:=S.SE;
+ LagSM:=S.L1;LagMB:=S.L2;LagBM:=S.L3;LagMT:=S.L4;SmoothBM:=S.L5;
+ InflowFactor:=S.Fct;InitElev:=S.IEl;
+ HBase:=S.HB;HPeak:=S.HP;HT0:=S.H0;HTp:=S.HT;PrjFr:=S.T1;PrjEn:=S.T2;
+End;
+
+Function BaseName(Fn:String):String;
+Var D:DirStr;N:NameStr;E:ExtStr;
+Begin
+ FSplit(Fn,D,N,E);
+ BaseName:=N+E;
+End;
+
+{ Charge un fichier projet. En cas d'erreur, l'etat courant est conserve. }
 Function LoadProject(Fn:String):Boolean;
 Var
  F:Text;
  L,Key:String;
  I,O,Zn,Rn:Integer;
  A:Double;
- Sv:TModel;
+ Sv:TState;
+ Bad:Boolean;
 Begin
  LoadProject:=False;
  {$I-}
@@ -1343,17 +1395,30 @@ Begin
  Reset(F);
  {$I+}
  If IOResult<>0 Then Exit;
- Sv:=M;
  ReadLn(F,L);
  If Copy(L,1,6)<>'RESSIM'Then Begin Close(F);Exit;End;
+ GetState(Sv);
+ InitDefaults;
+ SetDescr;
  While Not Eof(F)do Begin
   ReadLn(F,L);
   Key:=StrUp(NextTok(L));
-  If Key='FACTOR'Then InflowFactor:=TokNum(L)
+  If Key='TITLE'Then PrjFr:=Copy(Acc(L),1,60)
+  Else If Key='TITLE_EN'Then PrjEn:=Copy(Acc(L),1,60)
+  Else If Key='FACTOR'Then InflowFactor:=TokNum(L)
   Else If Key='INITELEV'Then InitElev:=TokNum(L)
   Else If Key='SIM'Then Begin
    SimStart:=Clamp(Round(TokNum(L)),1,NT-2);
    SimEnd:=Clamp(Round(TokNum(L)),SimStart+1,NT-1);
+  End
+  Else If Key='LAG'Then Begin
+   LagSM:=Clamp(Round(TokNum(L)),0,24);LagMB:=Clamp(Round(TokNum(L)),0,24);
+   LagBM:=Clamp(Round(TokNum(L)),0,24);LagMT:=Clamp(Round(TokNum(L)),0,24);
+   SmoothBM:=Clamp(Round(TokNum(L)),0,6);
+  End
+  Else If Key='HYD'Then Begin
+   I:=Clamp(Round(TokNum(L)),0,3);
+   HBase[I]:=TokNum(L);HPeak[I]:=TokNum(L);HT0[I]:=TokNum(L);HTp[I]:=TokNum(L);
   End
   Else If Key='ALT'Then Begin
    I:=Clamp(Round(TokNum(L)),0,NAlts-1);
@@ -1400,14 +1465,98 @@ Begin
   End;
  End;
  Close(F);
- { Validation : les elevations doivent etre croissantes }
- For I:=1 to PoolN-1 do If M.PE[I]<=M.PE[I-1]Then Begin M:=Sv;Exit;End;
- For I:=1 to GateN-1 do If M.GE[I]<=M.GE[I-1]Then Begin M:=Sv;Exit;End;
+ { Validation : tables croissantes, hydrogrammes coherents }
+ Bad:=False;
+ For I:=1 to PoolN-1 do If M.PE[I]<=M.PE[I-1]Then Bad:=True;
+ For I:=1 to GateN-1 do If M.GE[I]<=M.GE[I-1]Then Bad:=True;
  For O:=0 to NOps-1 do
   For Zn:=1 to NZones-1 do
-   If M.Ops[O].Z[Zn].Top<=M.Ops[O].Z[Zn-1].Top Then Begin M:=Sv;Exit;End;
+   If M.Ops[O].Z[Zn].Top<=M.Ops[O].Z[Zn-1].Top Then Bad:=True;
+ For I:=0 to 3 do
+  If(HTp[I]<=0)or(HBase[I]<0)or(HPeak[I]<HBase[I])Then Bad:=True;
+ If(InflowFactor<0.1)or(InflowFactor>5)Then Bad:=True;
+ If(InitElev<M.PE[0])or(InitElev>M.PE[PoolN-1])Then Bad:=True;
+ If Bad Then Begin SetState(Sv);Exit;End;
  SetDescr;
+ DispT:=SimStart;
+ CurName:=BaseName(Fn);
  LoadProject:=True;
+End;
+
+{ Titre d'un fichier projet (pour la liste d'ouverture) }
+Function PeekTitle(Fn:String):String;
+Var
+ F:Text;
+ L,Key,Fr,En:String;
+ N:Integer;
+Begin
+ Fr:='';En:='';N:=0;
+ {$I-}
+ Assign(F,Fn);
+ Reset(F);
+ {$I+}
+ If IOResult<>0 Then Begin PeekTitle:='';Exit;End;
+ While(Not Eof(F))and(N<16)do Begin
+  ReadLn(F,L);Inc(N);
+  Key:=StrUp(NextTok(L));
+  If Key='TITLE'Then Fr:=Copy(Acc(L),1,56);
+  If Key='TITLE_EN'Then En:=Copy(L,1,56);
+ End;
+ Close(F);
+ If Eng and(En<>'')Then PeekTitle:=En
+  Else If Fr<>''Then PeekTitle:=Fr
+  Else PeekTitle:=En;
+End;
+
+{ Liste des projets disponibles : SAMPLES\RESSIM\ puis repertoire courant }
+Var
+ PickPath:Array[0..11] of String[100];
+ PickN:Integer;
+
+Function SampleDir(Which:Integer):String;
+Var D:DirStr;N:NameStr;E:ExtStr;
+Begin
+ If Which=0 Then SampleDir:='SAMPLES'+DirSep+'RESSIM'+DirSep
+  Else Begin
+   FSplit(ParamStr(0),D,N,E);
+   SampleDir:=D+'SAMPLES'+DirSep+'RESSIM'+DirSep;
+  End;
+End;
+
+Procedure ScanDir(Dir:String);
+Var SR:SearchRec;
+Begin
+ FindFirst(Dir+'*.RSM',Archive,SR);
+ While(DosError=0)and(PickN<11)do Begin
+  PickPath[PickN]:=Dir+SR.Name;
+  ChItems[PickN]:=PadR(SR.Name,13)+PeekTitle(Dir+SR.Name);
+  Inc(PickN);
+  FindNext(SR);
+ End;
+ {$IFDEF FPC}FindClose(SR);{$ENDIF}
+End;
+
+Procedure ScanProjects;
+Var I,J:Integer;
+    P:String[100];
+    C:String[70];
+Begin
+ PickN:=0;
+ ScanDir(SampleDir(0));
+ If FExpand(SampleDir(1))<>FExpand(SampleDir(0))Then ScanDir(SampleDir(1));
+ ScanDir('');
+ For I:=0 to PickN-2 do
+  For J:=I+1 to PickN-1 do
+   If StrUp(BaseName(PickPath[J]))<StrUp(BaseName(PickPath[I]))Then Begin
+    P:=PickPath[I];PickPath[I]:=PickPath[J];PickPath[J]:=P;
+    C:=ChItems[I];ChItems[I]:=ChItems[J];ChItems[J]:=C;
+   End;
+End;
+
+{ Charge l'exemple par defaut s'il existe (SAMPLES\RESSIM\BALDEAGL.RSM) }
+Function LoadDefaultSample:Boolean;Begin
+ LoadDefaultSample:=LoadProject(SampleDir(0)+'BALDEAGL.RSM')or
+                    LoadProject(SampleDir(1)+'BALDEAGL.RSM');
 End;
 
 Function ExportCSV(Fn:String):Boolean;
@@ -2811,7 +2960,8 @@ Procedure DrawTitle;Begin
  FillR(0,0,SW-1,TitleH-1,DarkGray);
  FillR(4,3,10,9,LightBlue);
  SetColor(White);Rectangle(4,3,10,9);
- TxtAt(18,3,'RESSIM '+AppVer+' - BaldEagle_V3.5',White);
+ If CurName<>'' Then TxtAt(18,3,'RESSIM '+AppVer+' - BaldEagle_V3.5  ['+CurName+']',White)
+  Else TxtAt(18,3,'RESSIM '+AppVer+' - BaldEagle_V3.5',White);
 End;
 
 Procedure DrawModuleRow;
@@ -2976,6 +3126,8 @@ Begin
  FillR(0,SH-StatH,SW-1,SH-1,LightGray);
  Bevel(0,SH-StatH,SW-1,SH-1,False);
  If StatMsg<>'' Then S:=StatMsg
+  Else If(Eng and(PrjEn<>''))Then S:=PrjEn
+  Else If(Not Eng)and(PrjFr<>'')Then S:=PrjFr
   Else S:=Tr('Local Workspace BaldEagle_V3.5 ouvert','Local Workspace BaldEagle_V3.5 opened');
  TxtW(6,SH-StatH+4,SW-220,S,Black);
  TxtAt(SW-210,SH-StatH+4,FmtDT2(DispT),DarkGray);
@@ -3044,6 +3196,8 @@ Procedure ShowHelp;Begin
  TxtAdd(Tr('  Les r\ggles du haut de la liste sont les plus prioritaires.','  Rules at the top of the list have the highest priority.'));
  TxtAdd(Tr('  Zones de conservation : d\ebit = minimum ; zones de crue :','  Conservation zone: release = minimum ; flood zones:'));
  TxtAdd(Tr('  d\ebit = maximum permis par les r\ggles.','  release = maximum allowed by the rules.'));
+ TxtAdd('');
+ TxtAdd(Tr('Exemples : Fichier > Ouvrir liste les projets de SAMPLES\\RESSIM\\*.RSM.','Samples: File > Open lists the projects in SAMPLES\\RESSIM\\*.RSM.'));
  TxtAdd('');
  TxtAdd(Tr('Clavier : F1 aide, F2 \editeur, F5 calcul, F6 module, F7 graphique,','Keys: F1 help, F2 editor, F5 compute, F6 module, F7 plot,'));
  TxtAdd(Tr('  F8 rapport, F10 menus, +/- zoom, \Echap ferme, Alt+X quitte.','  F8 report, F10 menus, +/- zoom, Esc closes, Alt+X exits.'));
@@ -3233,9 +3387,17 @@ Begin
 End;
 
 Procedure DoOpen;
-Var Fn:String;
+Var
+ Fn:String;
+ K:Integer;
 Begin
- If Not AskFile(Tr('Ouvrir','Open'),Tr('Nom du fichier projet :','Project file name:'),'RESSIM.RSM',Fn)Then Exit;
+ ScanProjects;
+ ChItems[PickN]:=Tr('Autre fichier...','Other file...');
+ ChN:=PickN+1;
+ K:=ChoiceBox(Tr('Ouvrir un projet ou un exemple','Open a project or a sample'),0);
+ If K<0 Then Exit;
+ If K<PickN Then Fn:=PickPath[K]
+  Else If Not AskFile(Tr('Ouvrir','Open'),Tr('Nom du fichier projet :','Project file name:'),'RESSIM.RSM',Fn)Then Exit;
  If WOpen[wRes]Then WinClose(wRes);
  If LoadProject(Fn)Then Begin
   FileName:=Fn;
@@ -3753,15 +3915,17 @@ Procedure ShowCmdHelp;Begin
  WriteLn(Tr('Options :','Options:'));
  WriteLn(Tr('  -maxscreen   Utilise la r\esolution maximale (Free Pascal).','  -maxscreen   Use the maximum resolution (Free Pascal).'));
  WriteLn(Tr('  -c           Calcule et affiche un r\esum\e sans interface graphique.','  -c           Compute and print a summary without graphics.'));
+ WriteLn(Tr('  -s fichier   \Ecrit le projet courant dans un fichier .RSM et quitte.','  -s file      Write the current project to an .RSM file and exit.'));
  WriteLn(Tr('  -h, /?       Affiche cette aide.','  -h, /?       Show this help.'));
  WriteLn;
+ WriteLn(Tr('Exemples : SAMPLES\\RESSIM\\*.RSM (BALDEAGL.RSM est charg\e par d\efaut).','Samples: SAMPLES\\RESSIM\\*.RSM (BALDEAGL.RSM is loaded by default).'));
  WriteLn(Tr('Par d\efaut : mode 640x480. LANGUAGE=EN pour l''interface en anglais.',
             'Default: 640x480 mode. LANGUAGE=EN for the English interface.'));
 End;
 
 Var
  ArgI:Integer;
- Arg,FileArg:String;
+ Arg,FileArg,SaveArg:String;
 
 BEGIN
  Eng:=False;
@@ -3770,16 +3934,22 @@ BEGIN
   If TmpLang[1]='"'Then TmpLang:=Copy(TmpLang,2,255);
   If StrUp(Copy(TmpLang,1,2))='EN'Then Eng:=True;
  End;
- MaxScreen:=False;ConsoleMode:=False;FileArg:='';
+ MaxScreen:=False;ConsoleMode:=False;FileArg:='';SaveArg:='';
  If(ParamStr(1)='/?')or(ParamStr(1)='--help')or(ParamStr(1)='-h')Then Begin
   ShowCmdHelp;
   Halt;
  End;
- For ArgI:=1 to ParamCount do Begin
+ ArgI:=1;
+ While ArgI<=ParamCount do Begin
   Arg:=StrUp(ParamStr(ArgI));
   If(Arg='-MAXSCREEN')or(Arg='/MAXSCREEN')Then MaxScreen:=True
   Else If(Arg='-C')or(Arg='/C')Then ConsoleMode:=True
+  Else If(Arg='-S')or(Arg='/S')Then Begin
+   Inc(ArgI);
+   If ArgI<=ParamCount Then SaveArg:=ParamStr(ArgI);
+  End
   Else If(FileArg='')and(Copy(Arg,1,1)<>'-')and(Copy(Arg,1,1)<>'/')Then FileArg:=ParamStr(ArgI);
+  Inc(ArgI);
  End;
  InitDefaults;
  SetDescr;
@@ -3790,9 +3960,15 @@ BEGIN
     WriteLn(Tr('Fichier invalide ou introuvable : ','Invalid or missing file: '),FileArg);
     Halt(1);
    End;
- End;
+ End
+  Else LoadDefaultSample;
  BuildInputs;
  DoCompute;
+ If SaveArg<>''Then Begin
+  If SaveProject(SaveArg)Then WriteLn(Tr('Projet \ecrit : ','Project written: '),SaveArg)
+   Else Begin WriteLn(Tr('\Echec de l''\ecriture : ','Write failed: '),SaveArg);Halt(1);End;
+  Halt;
+ End;
  If ConsoleMode Then ConsoleRun
   Else Begin
   If Not MouseDriverFound Then Begin
